@@ -131,14 +131,14 @@ const RESERVED_PATH: &'static str = "::bitbuf::a";
 
 include!("consts.rs");
 
-fn if_def_internal(input2: syn::Path, item: Option<syn::Item>) -> Option<Option<syn::Item>> {
+fn if_def_internal(input2: syn::Path) -> bool {
     use std::fmt::Write;
 
     let span = input2.segments.first().expect("empty path").ident.span().unwrap();
     let input2 = input2.into_token_stream().to_string();
 
     if input2 == RESERVED_PATH {
-        return None
+        return false
     }
 
     let import = format!("use {} as _;", input2);
@@ -309,21 +309,21 @@ fn if_def_internal(input2: syn::Path, item: Option<syn::Item>) -> Option<Option<
         }
 
         if stderr.contains(&format!("{}:{}", line, column)) {
-            return None
+            return false
         }
 
         column += 1;
     }
 
-    Some(item)
+    true
 }
 
 use syn::parse_macro_input;
 
 #[proc_macro_attribute]
 pub fn if_def(attr: TokenStream, item: TokenStream) -> TokenStream {
-    if let Some(Some(e)) = if_def_internal(parse_macro_input!(attr as syn::Path), Some(parse_macro_input!(item as syn::Item))) {
-        e.into_token_stream().into()
+    if if_def_internal(parse_macro_input!(attr as syn::Path)) {
+        item
     } else {
         TokenStream::new()
     }
@@ -331,7 +331,7 @@ pub fn if_def(attr: TokenStream, item: TokenStream) -> TokenStream {
 
 #[proc_macro]
 pub fn defined(input: TokenStream) -> TokenStream {
-    if if_def_internal(parse_macro_input!(input as syn::Path), None).is_some() {
+    if if_def_internal(parse_macro_input!(input as syn::Path)) {
         "true".parse().unwrap()
     } else {
         "false".parse().unwrap()
@@ -352,7 +352,7 @@ const CFG_FALSE: &'static str = if cfg!(windows) {
 
 #[proc_macro]
 pub fn cfg_defined(input: TokenStream) -> TokenStream {
-    if if_def_internal(parse_macro_input!(input as syn::Path), None).is_some() {
+    if if_def_internal(parse_macro_input!(input as syn::Path)) {
         CFG_TRUE.parse().unwrap()
     } else {
         CFG_FALSE.parse().unwrap()

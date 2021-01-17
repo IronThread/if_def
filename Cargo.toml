@@ -15,13 +15,17 @@ proc-macro = true
 
 [dependencies]
 sync_2 = "1"
-syn = { version = "1", features = ["full", "extra-traits"] }
 quote = "1"
 dirs = "3"
 cargo_metadata = "0"
 ripcmd_command = { path = "C:/Users/Santino/repos/ripcmd/src/ripcmd_command" }
 rand = "0"
 lazy_static = "1"
+
+[dependencies.syn]
+version = "1"
+default-features = false
+features = ["parsing", "proc-macro"]
 
 [build-dependencies]
 dirs = "3"
