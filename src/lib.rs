@@ -17,7 +17,6 @@ use std::{
 use sync_2::Mutex;
 
 use rand::prelude::*;
-use ripcmd_command::*;
 
 fn source_file(x: TokenStream) -> PathBuf {
     use proc_macro::TokenTree::*;

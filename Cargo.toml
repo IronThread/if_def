@@ -16,7 +16,6 @@ proc-macro = true
 [dependencies]
 sync_2 = "1"
 dirs = "3"
-ripcmd_command = { path = "C:/Users/Santino/repos/ripcmd/src/ripcmd_command" }
 rand = "0"
 quote = "1"
 
