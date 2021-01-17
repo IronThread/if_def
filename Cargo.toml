@@ -1,0 +1,27 @@
+[package]
+name = "if_def" 
+version = "0.1.0"
+authors = ["IronThread <santinofuenteskillian@gmail.com>"]
+edition = "2018"
+license = "Unlicense"
+readme = "README.md"
+description = "if_def preprocedural macro implemented in rust."
+repository = "https://github.com/IronThread/if_def"
+keywords = ["if_def","c"]
+categories = []
+
+[lib]
+proc-macro = true
+
+[dependencies]
+sync_2 = "1"
+syn = { version = "1", features = ["full", "extra-traits"] }
+quote = "1"
+dirs = "3"
+cargo_metadata = "0"
+ripcmd_command = { path = "C:/Users/Santino/repos/ripcmd/src/ripcmd_command" }
+rand = "0"
+lazy_static = "1"
+
+[build-dependencies]
+dirs = "3"
