@@ -188,7 +188,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
         for e in fs::read_dir(src).expect("failed to read src") {
             let entry = e.expect("failed to get entry of src");
             let path = entry.path();
-            let file_name = path.iter().last().unwrap();
+            let file_name = path.file_name().unwrap();
             temp_dir.push(file_name);
 
             if entry.metadata().unwrap().is_dir() {
