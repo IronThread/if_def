@@ -1,23 +1,23 @@
 #![feature(proc_macro_span, thread_spawn_unchecked, proc_macro_quote)]
 
+use dirs::{cache_dir as temp_dir, home_dir};
 use proc_macro::TokenStream;
 use quote::ToTokens;
 use std::iter;
 use std::{
     borrow::Cow,
     collections::HashMap,
-    fs::{self, canonicalize, File},
-    mem,
     env,
+    fs::{self, canonicalize, File},
+    io::{self, prelude::*, SeekFrom},
+    mem,
     path::{Path, PathBuf},
     process::Command,
-    io::{self, SeekFrom, prelude::*},
 };
 use sync_2::Mutex;
-use dirs::{cache_dir as temp_dir, home_dir};
 
-use ripcmd_command::*;
 use rand::prelude::*;
+use ripcmd_command::*;
 
 fn source_file(x: TokenStream) -> PathBuf {
     use proc_macro::TokenTree::*;
@@ -134,18 +134,26 @@ include!("consts.rs");
 fn if_def_internal(input2: syn::Path) -> bool {
     use std::fmt::Write;
 
-    let span = input2.segments.first().expect("empty path").ident.span().unwrap();
+    let span = input2
+        .segments
+        .first()
+        .expect("empty path")
+        .ident
+        .span()
+        .unwrap();
     let input2 = input2.into_token_stream().to_string();
 
     if input2 == RESERVED_PATH {
-        return false
+        return false;
     }
 
     let import = format!("use {} as _;", input2);
 
     let mut t = TEMP_DIR.lock().unwrap();
     let mut temp_dir = t.get_or_insert_with(|| {
-        let mut p = temp_dir().or_else(|| env::var("OUT_DIR").ok().map(PathBuf::from)).unwrap_or_default();
+        let mut p = temp_dir()
+            .or_else(|| env::var("OUT_DIR").ok().map(PathBuf::from))
+            .unwrap_or_default();
 
         p.push("rust_if_def");
         p
@@ -155,7 +163,9 @@ fn if_def_internal(input2: syn::Path) -> bool {
     let mut end = span.end();
     let p = span.source_file().path();
 
-    let file = p.file_name().expect("maybe not that real file lacks filename");
+    let file = p
+        .file_name()
+        .expect("maybe not that real file lacks filename");
 
     let rand_int: u128 = random();
     let crate_n = rand_int.to_string();
@@ -164,68 +174,102 @@ fn if_def_internal(input2: syn::Path) -> bool {
     temp_dir.push("src");
     fs::create_dir_all(&temp_dir);
 
-
     let mut buffer = String::new();
     let mut cr = false;
     let mut start_index = 0;
     let mut last_opened = None;
 
-    for e in fs::read_dir("src").expect("failed to read src") {
-        let path = e.expect("failed to get entry of src").path();
-        let file_name = path.file_name().unwrap();
+    fn copy_all<T: AsRef<Path>>(
+        src: T,
+        mut temp_dir: &mut PathBuf,
+        last_opened: &mut Option<(File, File)>,
+        buffer: &mut String,
+        file: T,
+    ) {
+        for e in fs::read_dir(src).expect("failed to read src") {
+            let entry = e.expect("failed to get entry of src");
+            let path = entry.path();
+            let file_name = path.iter().last().unwrap();
+            temp_dir.push(file_name);
 
-        temp_dir.push(&file_name);
+            if entry.metadata().unwrap().is_dir() {
+                copy_all(
+                    path.as_ref(),
+                    &mut *temp_dir,
+                    last_opened,
+                    buffer,
+                    file.as_ref(),
+                );
+            } else {
+                let mut f =
+                    File::create(&*temp_dir).expect("failed to copy from src,creating a file.");
+                let mut r = File::open(&*path).expect("failed to copy from src,reading a file.");
 
-        let mut f = File::create(&temp_dir).expect("failed to copy from src,creating a file.");
-        let mut r = File::open(&path).expect("failed to copy from src,reading a file.");
+                if last_opened.is_none() && file_name == file.as_ref().as_os_str() {
+                    *last_opened = Some((r, f));
+                    continue;
+                }
 
-        temp_dir.pop();
+                r.read_to_string(buffer);
+                f.write_all(buffer.as_bytes());
+                buffer.clear();
+            }
 
-        if last_opened.is_none() && file_name == file {
-            last_opened = Some((r, f));
-            continue
+            temp_dir.pop();
         }
-
-        r.read_to_string(&mut buffer);
-        f.write_all(buffer.as_bytes());
-        buffer.clear();
     }
+
+    copy_all(
+        "src".as_ref(),
+        &mut temp_dir,
+        &mut last_opened,
+        &mut buffer,
+        file,
+    );
 
     if let Some((mut r, mut f)) = last_opened {
         r.read_to_string(&mut buffer);
 
-            cr = if let Some(i) = buffer.find('\n') {
-                if let Some(s) = buffer.get(i - 1..i) {
-                    s == "\r"            
-                } else {
-                    false
-                }
+        cr = if let Some(i) = buffer.find('\n') {
+            if let Some(s) = buffer.get(i - 1..i) {
+                s == "\r"
             } else {
                 false
-            };
+            }
+        } else {
+            false
+        };
 
-            start_index = buffer
-                                .lines()
-                                .take(start.line - 1)
-                                .map(|e| e.len() + 1 + (cr as usize))
-                                .sum::<usize>() + start.column;
-            let end_index = buffer
-                                .lines()
-                                .take(end.line - 1)
-                                .map(|e| e.len() + 1 + (cr as usize))
-                                .sum::<usize>() + end.column;
+        start_index = buffer
+            .lines()
+            .take(start.line - 1)
+            .map(|e| e.len() + 1 + (cr as usize))
+            .sum::<usize>()
+            + start.column;
+        let end_index = buffer
+            .lines()
+            .take(end.line - 1)
+            .map(|e| e.len() + 1 + (cr as usize))
+            .sum::<usize>()
+            + end.column;
 
-            unsafe { buffer.as_mut_vec().splice(start_index..end_index, RESERVED_PATH.as_bytes().iter().copied()); }
+        unsafe {
+            buffer.as_mut_vec().splice(
+                start_index..end_index,
+                RESERVED_PATH.as_bytes().iter().copied(),
+            );
+        }
 
-/*
-            start_index = buffer[..start_index].rfind('(').unwrap_or(0);
-            start_index = buffer[..start_index].rfind('!').unwrap_or(0);
-            start_index = buffer[..start_index].rfind(|c| !(c.is_alphabetic() && c.is_numeric())).unwrap_or(0);
-*/
+        /*
+                    start_index = buffer[..start_index].rfind('(').unwrap_or(0);
+                    start_index = buffer[..start_index].rfind('!').unwrap_or(0);
+                    start_index = buffer[..start_index].rfind(|c| !(c.is_alphabetic() && c.is_numeric())).unwrap_or(0);
+        */
 
-            let mut close_brace_count = 0_i64;
-            let mut close_par_count = 0_i64;
-            start_index = buffer[..start_index].rfind(|c| {
+        let mut close_brace_count = 0_i64;
+        let mut close_par_count = 0_i64;
+        start_index = buffer[..start_index]
+            .rfind(|c| {
                 let close_brace = c == '}';
                 let close_par = c == ')';
                 let open_par = c == '(';
@@ -237,13 +281,14 @@ fn if_def_internal(input2: syn::Path) -> bool {
                 close_par_count -= open_par as i64;
 
                 open_brace && close_brace_count <= 0 && close_par_count <= 0
-            }).unwrap_or(0);
-            
-            start_index += 1;
+            })
+            .unwrap_or(0);
 
-            buffer.insert_str(start_index, &import);
+        start_index += 1;
 
-            f.write_all(buffer.as_bytes());
+        buffer.insert_str(start_index, &import);
+
+        f.write_all(buffer.as_bytes());
     }
 
     temp_dir.pop();
@@ -251,19 +296,21 @@ fn if_def_internal(input2: syn::Path) -> bool {
 
     fs::copy("Cargo.toml", &temp_dir);
 
-    temp_dir.pop();
-    temp_dir.push("target");
+    /*
+        temp_dir.pop();
+        temp_dir.push("target");
 
-    copy_recursive("target", &temp_dir);
+        copy_recursive("target", &temp_dir);
+    */
 
     temp_dir.pop();
     temp_dir.push(".cargo");
 
-/*
-    if let Some(e) = env::var_os("CARGO_HOME") {
-        copy_recursive(e, &temp_dir);
-    }
-*/
+    /*
+        if let Some(e) = env::var_os("CARGO_HOME") {
+            copy_recursive(e, &temp_dir);
+        }
+    */
 
     env::set_var("CARGO_HOME", temp_dir.as_os_str());
 
@@ -275,15 +322,16 @@ fn if_def_internal(input2: syn::Path) -> bool {
         command.arg("--release");
     }
 
-    use std::process::Stdio;    
+    use std::process::Stdio;
 
-    let stderr = String::from_utf8(command.output().expect("failed to launch program.").stderr).expect("stderr non-utf8.");
+    let stderr = String::from_utf8(command.output().expect("failed to launch program.").stderr)
+        .expect("stderr non-utf8.");
 
     drop(temp_dir);
 
     let mut line = 0;
     let mut column = 0;
-    let mut index = 0;            
+    let mut index = 0;
 
     for e in buffer.lines() {
         line += 1;
@@ -291,7 +339,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
 
         if index >= start_index {
             column = index - start_index;
-            break
+            break;
         }
 
         index += 1 + (cr as usize);
@@ -299,17 +347,17 @@ fn if_def_internal(input2: syn::Path) -> bool {
 
     for c in buffer[start_index..start_index + import.len()].chars() {
         if c == '\r' {
-            continue
+            continue;
         }
 
         if c == '\n' {
             column = 0;
             line += 1;
-            continue
+            continue;
         }
 
         if stderr.contains(&format!("{}:{}", line, column)) {
-            return false
+            return false;
         }
 
         column += 1;
@@ -340,17 +388,9 @@ pub fn defined(input: TokenStream) -> TokenStream {
     }
 }
 
-const CFG_TRUE: &'static str = if cfg!(windows) {
-    "windows"
-} else {
-    "unix"
-};
+const CFG_TRUE: &'static str = if cfg!(windows) { "windows" } else { "unix" };
 
-const CFG_FALSE: &'static str = if cfg!(windows) {
-    "unix"
-} else {
-    "windows"
-};
+const CFG_FALSE: &'static str = if cfg!(windows) { "unix" } else { "windows" };
 
 #[proc_macro]
 pub fn cfg_defined(input: TokenStream) -> TokenStream {
@@ -400,63 +440,63 @@ fn manage_items(item: &mut syn::Item, crate_rep: syn::Ident, features: &[String]
     }
     Enum(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     ExternCrate(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Fn(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     ForeignMod(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Impl(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Macro(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Macro2(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Mod(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Static(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Struct(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Trait(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     TraitAlias(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Type(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Union(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Use(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     _ => ()
 }
@@ -565,159 +605,159 @@ fn manage_exprs(item: &mut syn::Expr, crate_rep: syn::Ident, features: &[String]
     match item {
     Array(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Assign(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     AssignOp(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Async(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Await(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Binary(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Block(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Box(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Break(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Call(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Cast(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Closure(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Continue(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Field(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     ForLoop(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Group(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     If(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Index(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Let(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Lit(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Loop(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Macro(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Match(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     MethodCall(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Paren(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Path(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Range(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Reference(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Repeat(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Return(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Struct(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Try(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     TryBlock(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     },
     Tuple(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     },
     Type(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     },
     Unary(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Unsafe(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     While(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     Yield(ref mut x) => {
         change_attr(&mut x.attrs, crate_rep, features);
-        
+
     }
     _ => ()
 }

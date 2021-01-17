@@ -8,7 +8,7 @@ use std::process::{exit, Command};
 
 fn main() -> Result<(), Box<dyn Error>> {
     if fs::metadata("src/consts.rs").is_ok() {
-        return Ok(())
+        return Ok(());
     }
 
     if let Some(e) = Command::new("rustup")
@@ -69,12 +69,26 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 
     lib.push(".cargo/registry/src");
-    writeln!(f, r#"const SRC_REGISTRY_PATH: &str = r"{}";"#, lib.display())?;
+    writeln!(
+        f,
+        r#"const SRC_REGISTRY_PATH: &str = r"{}";"#,
+        lib.display()
+    )?;
 
     let cargo_home = std::env::var("CARGO_HOME").unwrap();
-    let home = cargo_home.strip_suffix(&['/', '\\'][..]).unwrap_or(&cargo_home);
-    writeln!(f, r#"const CARGO_CACHE: &str = r"{}/registry/cache";"#, home)?;
-    writeln!(f, r#"const CARGO_PACKAGE_CACHE: &str = r"{}/.package-cache";"#, home)?;
+    let home = cargo_home
+        .strip_suffix(&['/', '\\'][..])
+        .unwrap_or(&cargo_home);
+    writeln!(
+        f,
+        r#"const CARGO_CACHE: &str = r"{}/registry/cache";"#,
+        home
+    )?;
+    writeln!(
+        f,
+        r#"const CARGO_PACKAGE_CACHE: &str = r"{}/.package-cache";"#,
+        home
+    )?;
 
     Ok(())
 }
