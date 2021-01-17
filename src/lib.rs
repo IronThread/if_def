@@ -1,4 +1,4 @@
-#![feature(proc_macro_span, thread_spawn_unchecked)]
+#![feature(proc_macro_span, thread_spawn_unchecked, proc_macro_quote)]
 
 use proc_macro::TokenStream;
 use quote::ToTokens;
@@ -329,12 +329,14 @@ pub fn if_def(attr: TokenStream, item: TokenStream) -> TokenStream {
     }
 }
 
+use proc_macro::quote;
+
 #[proc_macro]
 pub fn defined(input: TokenStream) -> TokenStream {
     if if_def_internal(parse_macro_input!(input as syn::Path)) {
-        "true".parse().unwrap()
+        quote!(true)
     } else {
-        "false".parse().unwrap()
+        quote!(false)
     }
 }
 
