@@ -308,6 +308,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
     crate_dir.push("Cargo.toml");
 
     fs::copy(&crate_dir, &temp_dir);
+    crate_dir.pop();
 
     /*
         temp_dir.pop();
@@ -329,15 +330,16 @@ fn if_def_internal(input2: syn::Path) -> bool {
 
     command.env("CARGO_HOME", temp_dir.as_os_str());
     command.arg("check");
+    temp_dir.pop();
 
     if cfg!(not(debug_assertions)) {
         command.arg("--release");
     }
 
-    use std::process::Stdio;
-
     let stderr = String::from_utf8(command.output().expect("failed to launch program.").stderr)
         .expect("stderr non-utf8.");
+
+    temp_dir.pop();
 
     drop(temp_dir);
 
