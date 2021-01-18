@@ -160,7 +160,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
     });
 
     let mut ctd = CRATE_DIR.lock().unwrap();
-    let mut crate_dir = ctd.get_or_insert_with(|| PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").or_else(|| env::current_dir().ok()).unwrap_or_default()));
+    let mut crate_dir = ctd.get_or_insert_with(|| env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from).unwrap_or_default());
 
     let mut start = span.start();
     let mut end = span.end();
@@ -216,8 +216,8 @@ fn if_def_internal(input2: syn::Path) -> bool {
 
                 unsafe {
                     let buffer = buffer.as_mut_vec();
-                    r.read_to_string(buffer);
-                    f.write_all(buffer.as_bytes());
+                    r.read_to_end(buffer);
+                    f.write_all(&buffer[..]);
                     buffer.clear();
                 }
             }
@@ -229,7 +229,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
     crate_dir.push("src");
 
     copy_all(
-        &crate_dir,
+        crate_dir.as_ref(),
         &mut temp_dir,
         &mut last_opened,
         &mut buffer,
