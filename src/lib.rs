@@ -112,6 +112,7 @@ fn get_crates() -> String {
 use std::time::Instant;
 
 static TEMP_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+static CRATE_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 
 /*
 static CRATE_NAME: Mutex<String> = Mutex::new(String::new());
@@ -158,6 +159,9 @@ fn if_def_internal(input2: syn::Path) -> bool {
         p
     });
 
+    let mut ctd = CRATE_DIR.lock().unwrap();
+    let mut crate_dir = ctd.get_or_insert_with(|| PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").or_else(|| env::current_dir().ok()).unwrap_or_default()));
+
     let mut start = span.start();
     let mut end = span.end();
     let p = span.source_file().path();
@@ -174,6 +178,10 @@ fn if_def_internal(input2: syn::Path) -> bool {
     let mut start_index = 0;
     let mut last_opened = None;
 
+    temp_dir.push(&crate_n);
+    temp_dir.push("src");
+    fs::create_dir_all(&temp_dir);
+
     fn copy_all<T: AsRef<Path>>(
         src: T,
         mut temp_dir: &mut PathBuf,
@@ -188,6 +196,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
             temp_dir.push(file_name);
 
             if entry.metadata().unwrap().is_dir() {
+                fs::create_dir(&temp_dir);
                 copy_all(
                     path.as_ref(),
                     &mut *temp_dir,
@@ -205,26 +214,29 @@ fn if_def_internal(input2: syn::Path) -> bool {
                     continue;
                 }
 
-                r.read_to_string(buffer);
-                f.write_all(buffer.as_bytes());
-                buffer.clear();
+                unsafe {
+                    let buffer = buffer.as_mut_vec();
+                    r.read_to_string(buffer);
+                    f.write_all(buffer.as_bytes());
+                    buffer.clear();
+                }
             }
 
             temp_dir.pop();
         }
     }
 
-    temp_dir.push(&crate_n);
-    temp_dir.push("src");
-    fs::create_dir_all(&temp_dir);
+    crate_dir.push("src");
 
     copy_all(
-        "src".as_ref(),
+        &crate_dir,
         &mut temp_dir,
         &mut last_opened,
         &mut buffer,
         file,
     );
+
+    crate_dir.pop();
 
     if let Some((mut r, mut f)) = last_opened {
         r.read_to_string(&mut buffer);
@@ -291,10 +303,11 @@ fn if_def_internal(input2: syn::Path) -> bool {
     }
 
     temp_dir.pop();
-    temp_dir.pop();
     temp_dir.push("Cargo.toml");
+    crate_dir.pop();
+    crate_dir.push("Cargo.toml");
 
-    fs::copy("Cargo.toml", &temp_dir);
+    fs::copy(&crate_dir, &temp_dir);
 
     /*
         temp_dir.pop();
