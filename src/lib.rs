@@ -1,139 +1,31 @@
 #![feature(proc_macro_span, thread_spawn_unchecked, proc_macro_quote)]
 
-use dirs::{cache_dir as temp_dir, home_dir};
-use proc_macro::TokenStream;
-use quote::ToTokens;
-use std::iter;
-use std::{
-    borrow::Cow,
-    collections::HashMap,
-    env,
-    fs::{self, canonicalize, File},
-    io::{self, prelude::*, SeekFrom},
-    mem,
-    path::{Path, PathBuf},
-    process::Command,
+use ::{
+    dirs::{cache_dir as temp_dir, home_dir},
+    proc_macro::TokenStream,
+    quote::ToTokens,
+    rand::prelude::*,
+    std::{
+        borrow::Cow,
+        collections::HashMap,
+        env,
+        fs::{self, canonicalize, File},
+        io::{self, prelude::*, SeekFrom},
+        iter, mem,
+        path::{Path, PathBuf},
+        process::Command,
+    },
+    sync_2::Mutex,
 };
-use sync_2::Mutex;
-
-use rand::prelude::*;
-
-fn source_file(x: TokenStream) -> PathBuf {
-    use proc_macro::TokenTree::*;
-
-    let mut x = x.into_iter();
-    match x.next().unwrap() {
-        Group(x) => x.span().source_file().path(),
-        Ident(x) => x.span().source_file().path(),
-        Punct(x) => x.span().source_file().path(),
-        Literal(x) => x.span().source_file().path(),
-    }
-}
-
-/*
-lazy_static::lazy_static! {
-    static ref CODE_HELPER: Regex = Regex::new(r"(\b)crate(\b)").unwrap();
-}
-
-fn get_crates() -> String {
-    use std::fmt::Write;
-    use cargo_metadata::*;
-
-    // can't panic,if we reached here then the manifest was already checked
-    let a = MetadataCommand::new().exec().unwrap();
-
-    temp_dir().or_else(|| env::var("OUT_DIR").ok().map(PathBuf::from)).map(env::set_current_dir);
-
-    let packages = a.packages;
-    let mut code = String::new();
-
-    let mut crates_written = Vec::new();
-
-    while let Some(i) = packages.iter().position(|x| {
-        for e in x.dependencies.iter() {
-            if !crates_written.iter().any(|(name, version)| e.name == name && e.version == version) {
-                return false
-            }
-        }
-
-        true
-    }) {
-        let Package { targets, version, name, .. } = packages.swap_remove(i);
-
-        crates_written.push((name, version));
-
-        for target in targets {
-            let Target { src_path, required_features, kind, name, .. } = target;
-
-            let mut command = Command::new("rustc");
-            let mut crate_code = fs::read_to_string(src_path).unwrap();
-
-            if kind.contains("bin") {
-                name.push_str("_bin");
-            }
-
-            if name == "if_def" {
-                command.args(&["--cfg", r#"feature="useless_if_def""#])
-            }
-
-            write!(code, "mod {} {{ {} }}", name, CODE_HELPER.replace(&crate_code, |x| {
-                format!("{}crate::{}{}", x[1], name, x[2])
-            }));
-
-            fs::remove_file("crate");
-            let mut f = File::create("crate").unwrap();
-            f.write_all(code.as_bytes());
-            f.sync_all();
-
-            command.arg("crate");
-
-            required_features.into_iter().for_each(|mut e| {
-                unsafe { e.as_mut_vec().splice(0..0, br#"feature=""#) }
-
-                e.push('"');
-
-                command.arg("--cfg");
-                command.arg(e);
-            });
-
-            command.args(&["-Zunstable-options", "--pretty=expanded"]);
-
-            let expanded = command.output().unwrap();
-
-            code.clear();
-            unsafe { code.as_mut_vec().extend(expanded.stdout.iter().copied()) }
-        }
-    }
-
-    code
-}
-*/
-
-use std::time::Instant;
 
 static TEMP_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 static CRATE_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
-
-/*
-static CRATE_NAME: Mutex<String> = Mutex::new(String::new());
-
-fn crate_name() -> String {
-    let mut met = cargo_metadata::MetadataCommand::new();
-
-    met.no_deps();
-    met.exec().unwrap().packages.swap_remove(0).name
-}
-*/
 
 // bitbuf it's a crate of my own that got the convenience of having a short name and the fact will
 // never have the item it's taking
 const RESERVED_PATH: &'static str = "::bitbuf::a";
 
-include!("consts.rs");
-
 fn if_def_internal(input2: syn::Path) -> bool {
-    use std::fmt::Write;
-
     let span = input2
         .segments
         .first()
@@ -160,7 +52,11 @@ fn if_def_internal(input2: syn::Path) -> bool {
     });
 
     let mut ctd = CRATE_DIR.lock().unwrap();
-    let mut crate_dir = ctd.get_or_insert_with(|| env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from).unwrap_or_default());
+    let mut crate_dir = ctd.get_or_insert_with(|| {
+        env::var_os("CARGO_MANIFEST_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_default()
+    });
 
     let mut start = span.start();
     let mut end = span.end();
@@ -824,4 +720,101 @@ fn manage_types(item: &mut syn::Type, crate_rep: syn::Ident, features: &[String]
 }
 }
 
+static CRATE_NAME: Mutex<String> = Mutex::new(String::new());
+
+fn crate_name() -> String {
+    let mut met = cargo_metadata::MetadataCommand::new();
+
+    met.no_deps();
+    met.exec().unwrap().packages.swap_remove(0).name
+}
+lazy_static::lazy_static! {
+    static ref CODE_HELPER: Regex = Regex::new(r"(\b)crate(\b)").unwrap();
+}
+
+fn get_crates() -> String {
+    use std::fmt::Write;
+    use cargo_metadata::*;
+
+    // can't panic,if we reached here then the manifest was already checked
+    let a = MetadataCommand::new().exec().unwrap();
+
+    temp_dir().or_else(|| env::var("OUT_DIR").ok().map(PathBuf::from)).map(env::set_current_dir);
+
+    let packages = a.packages;
+    let mut code = String::new();
+
+    let mut crates_written = Vec::new();
+
+    while let Some(i) = packages.iter().position(|x| {
+        for e in x.dependencies.iter() {
+            if !crates_written.iter().any(|(name, version)| e.name == name && e.version == version) {
+                return false
+            }
+        }
+
+        true
+    }) {
+        let Package { targets, version, name, .. } = packages.swap_remove(i);
+
+        crates_written.push((name, version));
+
+        for target in targets {
+            let Target { src_path, required_features, kind, name, .. } = target;
+
+            let mut command = Command::new("rustc");
+            let mut crate_code = fs::read_to_string(src_path).unwrap();
+
+            if kind.contains("bin") {
+                name.push_str("_bin");
+            }
+
+            if name == "if_def" {
+                command.args(&["--cfg", r#"feature="useless_if_def""#])
+            }
+
+            write!(code, "mod {} {{ {} }}", name, CODE_HELPER.replace(&crate_code, |x| {
+                format!("{}crate::{}{}", x[1], name, x[2])
+            }));
+
+            fs::remove_file("crate");
+            let mut f = File::create("crate").unwrap();
+            f.write_all(code.as_bytes());
+            f.sync_all();
+
+            command.arg("crate");
+
+            required_features.into_iter().for_each(|mut e| {
+                unsafe { e.as_mut_vec().splice(0..0, br#"feature=""#) }
+
+                e.push('"');
+
+                command.arg("--cfg");
+                command.arg(e);
+            });
+
+            command.args(&["-Zunstable-options", "--pretty=expanded"]);
+
+            let expanded = command.output().unwrap();
+
+            code.clear();
+            unsafe { code.as_mut_vec().extend(expanded.stdout.iter().copied()) }
+        }
+    }
+
+    code
+}
+
+
+fn source_file(x: TokenStream) -> PathBuf {
+    use proc_macro::TokenTree::*;
+
+    let mut x = x.into_iter();
+    match x.next().unwrap() {
+        Group(x) => x.span().source_file().path(),
+        Ident(x) => x.span().source_file().path(),
+        Punct(x) => x.span().source_file().path(),
+        Literal(x) => x.span().source_file().path(),
+    }
+}
 */
