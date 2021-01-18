@@ -76,12 +76,12 @@ fn if_def_internal(input2: syn::Path) -> bool {
 
     temp_dir.push(&crate_n);
 
-    fn copy_all<T: AsRef<Path>>(
+    fn copy_all<T: AsRef<Path>, U: AsRef<Path>>(
         src: T,
         mut temp_dir: &mut PathBuf,
         last_opened: &mut Option<(File, File)>,
         buffer: &mut String,
-        file: T,
+        file: U,
     ) {
         for e in fs::read_dir(src).expect("failed to read src") {
             let entry = e.expect("failed to get entry of src");
@@ -105,14 +105,13 @@ fn if_def_internal(input2: syn::Path) -> bool {
 
                 if last_opened.is_none() && file_name == file.as_ref().as_os_str() {
                     *last_opened = Some((r, f));
-                    continue;
-                }
-
-                unsafe {
-                    let buffer = buffer.as_mut_vec();
-                    r.read_to_end(buffer);
-                    f.write_all(&buffer[..]);
-                    buffer.clear();
+                } else {
+                    unsafe {
+                        let buffer = buffer.as_mut_vec();
+                        r.read_to_end(buffer);
+                        f.write_all(&buffer[..]);
+                        buffer.clear();
+                    }
                 }
             }
 
@@ -125,7 +124,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
     fs::create_dir_all(&temp_dir);
 
     copy_all(
-        crate_dir.as_ref(),
+        &crate_dir,
         &mut temp_dir,
         &mut last_opened,
         &mut buffer,
