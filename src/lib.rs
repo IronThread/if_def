@@ -92,11 +92,11 @@ fn if_def_internal(input2: syn::Path) -> bool {
             if entry.metadata().unwrap().is_dir() {
                 fs::create_dir(&temp_dir);
                 copy_all(
-                    path.as_ref(),
+                    path,
                     &mut *temp_dir,
                     last_opened,
                     buffer,
-                    file.as_ref(),
+                    file,
                 );
             } else {
                 let mut f =
