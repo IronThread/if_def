@@ -179,8 +179,6 @@ fn if_def_internal(input2: syn::Path) -> bool {
     let mut last_opened = None;
 
     temp_dir.push(&crate_n);
-    temp_dir.push("src");
-    fs::create_dir_all(&temp_dir);
 
     fn copy_all<T: AsRef<Path>>(
         src: T,
@@ -227,6 +225,8 @@ fn if_def_internal(input2: syn::Path) -> bool {
     }
 
     crate_dir.push("src");
+    temp_dir.push("src");
+    fs::create_dir_all(&temp_dir);
 
     copy_all(
         crate_dir.as_ref(),
@@ -237,6 +237,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
     );
 
     crate_dir.pop();
+    temp_dir.pop();
 
     if let Some((mut r, mut f)) = last_opened {
         r.read_to_string(&mut buffer);
@@ -302,25 +303,21 @@ fn if_def_internal(input2: syn::Path) -> bool {
         f.write_all(buffer.as_bytes());
     }
 
-    temp_dir.pop();
     temp_dir.push("Cargo.toml");
-    crate_dir.pop();
     crate_dir.push("Cargo.toml");
-
     fs::copy(&crate_dir, &temp_dir);
     crate_dir.pop();
+    temp_dir.pop();
+
+    drop(crate_dir);
+    drop(ctd);
 
     /*
         temp_dir.pop();
         temp_dir.push("target");
 
         copy_recursive("target", &temp_dir);
-    */
 
-    temp_dir.pop();
-    temp_dir.push(".cargo");
-
-    /*
         if let Some(e) = env::var_os("CARGO_HOME") {
             copy_recursive(e, &temp_dir);
         }
@@ -328,9 +325,14 @@ fn if_def_internal(input2: syn::Path) -> bool {
 
     let mut command = Command::new("cargo");
 
+    temp_dir.push(".cargo");
     command.env("CARGO_HOME", temp_dir.as_os_str());
     command.arg("check");
     temp_dir.pop();
+
+    temp_dir.pop();
+    drop(temp_dir);
+    drop(t);
 
     if cfg!(not(debug_assertions)) {
         command.arg("--release");
@@ -338,10 +340,6 @@ fn if_def_internal(input2: syn::Path) -> bool {
 
     let stderr = String::from_utf8(command.output().expect("failed to launch program.").stderr)
         .expect("stderr non-utf8.");
-
-    temp_dir.pop();
-
-    drop(temp_dir);
 
     let mut line = 0;
     let mut column = 0;
