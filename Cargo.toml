@@ -23,6 +23,3 @@ quote = "1"
 version = "1"
 default-features = false
 features = ["parsing", "proc-macro", "derive", "printing"]
-
-[build-dependencies]
-dirs = "3"

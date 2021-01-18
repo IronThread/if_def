@@ -225,6 +225,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
     command.arg("check");
     temp_dir.pop();
 
+    command.current_dir(&temp_dir);
     temp_dir.pop();
     drop(temp_dir);
     drop(t);
