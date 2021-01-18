@@ -220,12 +220,14 @@ fn if_def_internal(input2: syn::Path) -> bool {
 
     let mut command = Command::new("cargo");
 
-    temp_dir.push(".cargo");
-    command.env("CARGO_HOME", temp_dir.as_os_str());
     command.arg("check");
-    temp_dir.pop();
-
     command.current_dir(&temp_dir);
+
+    temp_dir.pop();
+    temp_dir.push(".cargo");
+
+    command.env("CARGO_HOME", temp_dir.as_os_str());
+
     temp_dir.pop();
     drop(temp_dir);
     drop(t);
