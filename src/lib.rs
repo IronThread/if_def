@@ -311,10 +311,9 @@ fn if_def_internal(input2: syn::Path) -> bool {
         }
     */
 
-    env::set_var("CARGO_HOME", temp_dir.as_os_str());
-
     let mut command = Command::new("cargo");
 
+    command.env("CARGO_HOME", temp_dir.as_os_str());
     command.arg("check");
 
     if cfg!(not(debug_assertions)) {
