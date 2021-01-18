@@ -169,10 +169,6 @@ fn if_def_internal(input2: syn::Path) -> bool {
     let rand_int: u128 = random();
     let crate_n = rand_int.to_string();
 
-    temp_dir.push(&crate_n);
-    temp_dir.push("src");
-    fs::create_dir_all(&temp_dir);
-
     let mut buffer = String::new();
     let mut cr = false;
     let mut start_index = 0;
@@ -217,6 +213,10 @@ fn if_def_internal(input2: syn::Path) -> bool {
             temp_dir.pop();
         }
     }
+
+    temp_dir.push(&crate_n);
+    temp_dir.push("src");
+    fs::create_dir_all(&temp_dir);
 
     copy_all(
         "src".as_ref(),
@@ -290,6 +290,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
         f.write_all(buffer.as_bytes());
     }
 
+    temp_dir.pop();
     temp_dir.pop();
     temp_dir.push("Cargo.toml");
 
