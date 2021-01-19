@@ -34,12 +34,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
         .ident
         .span()
         .unwrap();
-    let input2 = input2.into_token_stream().to_string();
-
-    if input2.chars().filter(|c| !c.is_whitespace()).eq(RESERVED_PATH.chars().filter(|c| !c.is_whitespace())) {
-        return false;
-    }
-
+    let input2 = input2.into_token_stream();
     let import = format!("use {} as _;", input2);
 
     let mut t = TEMP_DIR.lock().unwrap();
@@ -291,7 +286,8 @@ use syn::parse_macro_input;
 
 #[proc_macro_attribute]
 pub fn if_def(attr: TokenStream, item: TokenStream) -> TokenStream {
-    if if_def_internal(parse_macro_input!(attr as syn::Path)) {
+    if attr != TokenStream::from_str(RESERVED_PATH).unwrap() 
+        || if_def_internal(parse_macro_input!(attr as syn::Path)) {
         item
     } else {
         TokenStream::new()
@@ -302,7 +298,8 @@ use proc_macro::quote;
 
 #[proc_macro]
 pub fn defined(input: TokenStream) -> TokenStream {
-    if if_def_internal(parse_macro_input!(input as syn::Path)) {
+    if attr != TokenStream::from_str(RESERVED_PATH).unwrap() 
+        || if_def_internal(parse_macro_input!(input as syn::Path)) {
         quote!(true)
     } else {
         quote!(false)
@@ -315,7 +312,8 @@ const CFG_FALSE: &'static str = if cfg!(windows) { "unix" } else { "windows" };
 
 #[proc_macro]
 pub fn cfg_defined(input: TokenStream) -> TokenStream {
-    if if_def_internal(parse_macro_input!(input as syn::Path)) {
+    if attr != TokenStream::from_str(RESERVED_PATH).unwrap() 
+        || if_def_internal(parse_macro_input!(input as syn::Path)) {
         CFG_TRUE.parse().unwrap()
     } else {
         CFG_FALSE.parse().unwrap()
