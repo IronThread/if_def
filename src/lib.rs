@@ -9,6 +9,7 @@ use ::{
         borrow::Cow,
         collections::HashMap,
         env,
+        fmt::Write as FmtWrite,
         fs::{self, canonicalize, File},
         io::{self, prelude::*, SeekFrom},
         iter, mem,
@@ -66,8 +67,18 @@ fn if_def_internal(input2: syn::Path) -> bool {
         .file_name()
         .expect("maybe not that real file lacks filename");
 
-    let rand_int: u128 = random();
-    let crate_n = rand_int.to_string();
+    let (rand_int, crate_n) = {
+        let mut t = random::<u128>();
+        let mut n = t.to_string();
+        
+        while Path::new(&n[..]).exists() {
+            t = random();
+            n.clear();
+            write!(n, "{}", t);
+        } 
+        
+        (t, n)
+    };
 
     let mut buffer = String::new();
     let mut cr = false;
