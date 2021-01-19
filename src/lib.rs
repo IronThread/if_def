@@ -1,7 +1,6 @@
 #![feature(proc_macro_span, thread_spawn_unchecked, proc_macro_quote)]
 
 use ::{
-    dirs::cache_dir as temp_dir,
     proc_macro::{Span, TokenStream},
     rand::prelude::*,
     std::{
@@ -41,14 +40,11 @@ fn if_def_internal(input2: TokenStream) -> bool {
     let import = format!("#[allow(unused_imports)]use {} as _;", input);
 
     let mut t = TEMP_DIR.lock().unwrap();
-    let temp_dir = t.get_or_insert_with(|| {
-        let mut p = temp_dir()
-            .or_else(|| env::var("OUT_DIR").ok().map(PathBuf::from))
-            .unwrap_or_default();
-
-        p.push("rust_if_def");
-        p
-    });
+    let temp_dir = t.get_or_insert_with(|| env::var_os("TMP")
+.or_else(|| env::var_os("OUT_DIR")).map(PathBuf::from).or_else(|| Ok(PathBuf::default())).map(|mut p| {
+            p.push("rust_if_def");
+            p
+        }));
 
     let mut ctd = CRATE_DIR.lock().unwrap();
     let crate_dir = ctd.get_or_insert_with(|| {
@@ -222,7 +218,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
         copy_recursive("target", &temp_dir);
 
-        if let Some(e) = env::var_os("CARGO_HOME") {
+         if let Some(e) = env::var_os("CARGO_HOME") {
             copy_recursive(e, &temp_dir);
         }
     */
@@ -246,7 +242,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
     }
 
     let stderr = String::from_utf8(command.output().expect("failed to launch program.").stderr)
-        .expect("stderr non-utf8.");
+        .expect("stderr non-utf8");
 
     let mut line = 0;
     let mut column = 0;
