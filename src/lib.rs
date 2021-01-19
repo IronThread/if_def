@@ -253,8 +253,6 @@ fn if_def_internal(input2: TokenStream) -> bool {
     let stderr = String::from_utf8(command.output().expect("failed to launch program.").stderr)
         .expect("stderr non-utf8.");
 
-    eprintln!("{}", stderr);
-
     let mut line = 0;
     let mut column = 0;
     let mut index = 0;
@@ -282,9 +280,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
             continue;
         }
 
-        eprintln!("checking {} : {} : {}", Path::new(file).display(), line, column);
         if stderr.contains(&format!("{}:{}:{}", Path::new(file).display(), line, column)) {
-            eprintln!("contained");
             return false;
         }
 
