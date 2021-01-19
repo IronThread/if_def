@@ -32,7 +32,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
         .unwrap();
 
     let input2 = input2.into_token_stream();
-    let import = format!("use {} as _;", input2);
+    let import = format!("#[allow(unused)]use {} as _;", input2);
 
     let mut t = TEMP_DIR.lock().unwrap();
     let mut temp_dir = t.get_or_insert_with(|| {
@@ -271,7 +271,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
             continue;
         }
 
-        if stderr.contains(&format!("{}:{}", line, column)) {
+        if stderr.contains(&format!("{}:{}:{}", Path::new(file).display(), line, column)) {
             return false;
         }
 
