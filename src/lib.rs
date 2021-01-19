@@ -36,7 +36,7 @@ fn if_def_internal(input2: syn::Path) -> bool {
         .unwrap();
     let input2 = input2.into_token_stream().to_string();
 
-    if input2 == RESERVED_PATH {
+    if input2.chars().filter(|c| !c.is_whitespace()).eq(RESERVED_PATH.chars().filter(|c| !c.is_whitespace())) {
         return false;
     }
 
