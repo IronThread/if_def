@@ -15,4 +15,3 @@ proc-macro = true
 
 [dependencies]
 sync_2 = "1"
-rand = "0"

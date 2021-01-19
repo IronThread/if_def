@@ -2,7 +2,6 @@
 
 use ::{
     proc_macro::{Span, TokenStream},
-    rand::prelude::*,
     std::{
         env,
         fmt::Write as FmtWrite,
@@ -41,10 +40,10 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
     let mut t = TEMP_DIR.lock().unwrap();
     let temp_dir = t.get_or_insert_with(|| env::var_os("TMP")
-.or_else(|| env::var_os("OUT_DIR")).map(PathBuf::from).or_else(|| Ok(PathBuf::default())).map(|mut p| {
+.or_else(|| env::var_os("OUT_DIR")).map(PathBuf::from).or_else(|| Some(PathBuf::default())).map(|mut p| {
             p.push("rust_if_def");
             p
-        }));
+        }).unwrap());
 
     let mut ctd = CRATE_DIR.lock().unwrap();
     let crate_dir = ctd.get_or_insert_with(|| {
@@ -62,7 +61,13 @@ fn if_def_internal(input2: TokenStream) -> bool {
         .expect("maybe not that real file lacks filename");
 
     let crate_n = {
-        let mut t = random::<u128>();
+        fn random() -> u128 {
+            use std::time::*;
+
+            SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_else(|e| e.duration()).as_nanos()
+        }
+
+        let mut t = random();
         let mut n = t.to_string();
 
         while Path::new(&n[..]).exists() {
