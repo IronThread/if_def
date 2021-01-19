@@ -242,6 +242,8 @@ fn if_def_internal(input2: syn::Path) -> bool {
     let stderr = String::from_utf8(command.output().expect("failed to launch program.").stderr)
         .expect("stderr non-utf8.");
 
+    eprintln!("{}", stderr);
+
     let mut line = 0;
     let mut column = 0;
     let mut index = 0;
