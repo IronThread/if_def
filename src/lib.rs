@@ -22,10 +22,6 @@ use ::{
 static TEMP_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 static CRATE_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 
-// bitbuf it's a crate of my own that got the convenience of having a short name and the fact will
-// never have the item it's taking
-const RESERVED_PATH: &'static str = "::bitbuf::a";
-
 fn if_def_internal(input2: syn::Path) -> bool {
     let span = input2
         .segments
@@ -169,7 +165,9 @@ fn if_def_internal(input2: syn::Path) -> bool {
         unsafe {
             buffer.as_mut_vec().splice(
                 start_index..end_index,
-                RESERVED_PATH.as_bytes().iter().copied(),
+                // bitbuf it's a crate of my own that got the convenience of having a short name
+                // and the fact will never have the item it's taking
+                "::bitbuf::a".as_bytes().iter().copied(),
             );
         }
 
@@ -286,8 +284,7 @@ use syn::parse_macro_input;
 
 #[proc_macro_attribute]
 pub fn if_def(attr: TokenStream, item: TokenStream) -> TokenStream {
-    if attr != TokenStream::from_str(RESERVED_PATH).unwrap() 
-        || if_def_internal(parse_macro_input!(attr as syn::Path)) {
+    if attr != quote!(::bitbuf::a) || if_def_internal(parse_macro_input!(attr as syn::Path)) {
         item
     } else {
         TokenStream::new()
@@ -298,8 +295,7 @@ use proc_macro::quote;
 
 #[proc_macro]
 pub fn defined(input: TokenStream) -> TokenStream {
-    if attr != TokenStream::from_str(RESERVED_PATH).unwrap() 
-        || if_def_internal(parse_macro_input!(input as syn::Path)) {
+    if input != quote!(::bitbuf::a) || if_def_internal(parse_macro_input!(input as syn::Path)) {
         quote!(true)
     } else {
         quote!(false)
@@ -312,8 +308,7 @@ const CFG_FALSE: &'static str = if cfg!(windows) { "unix" } else { "windows" };
 
 #[proc_macro]
 pub fn cfg_defined(input: TokenStream) -> TokenStream {
-    if attr != TokenStream::from_str(RESERVED_PATH).unwrap() 
-        || if_def_internal(parse_macro_input!(input as syn::Path)) {
+    if input != quote!(::bitbuf::a) || if_def_internal(parse_macro_input!(input as syn::Path)) {
         CFG_TRUE.parse().unwrap()
     } else {
         CFG_FALSE.parse().unwrap()
