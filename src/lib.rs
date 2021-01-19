@@ -2,8 +2,7 @@
 
 use ::{
     dirs::{cache_dir as temp_dir, home_dir},
-    proc_macro::TokenStream,
-    quote::ToTokens,
+    proc_macro::{TokenStream, Span},
     rand::prelude::*,
     std::{
         borrow::Cow,
@@ -22,17 +21,29 @@ use ::{
 static TEMP_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 static CRATE_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 
-fn if_def_internal(input2: syn::Path) -> bool {
-    let span = input2
-        .segments
-        .first()
-        .expect("empty path")
-        .ident
-        .span()
-        .unwrap();
 
-    let input2 = input2.into_token_stream();
-    let import = format!("#[allow(unused_imports)]use {} as _;", input2);
+fn first_span(mut x: TokenStream) -> Option<Span> {
+    use proc_macro::TokenTree::*;
+
+    x.into_iter().next().map(|e| match e {
+            Group(x) => x.span(),
+            Ident(x) => x.span(),
+            Punct(x) => x.span(),
+            Literal(x) => x.span(),
+        })
+}
+
+fn if_def_internal(input2: TokenStream) -> bool {
+    
+    let input = input2.clone();
+
+    let span = if let Some(e) = first_span(input2) {
+        e
+    } else {
+        return false
+    };
+
+    let import = format!("#[allow(unused_imports)]use {} as _;", input);
 
     let mut t = TEMP_DIR.lock().unwrap();
     let mut temp_dir = t.get_or_insert_with(|| {
@@ -232,6 +243,11 @@ fn if_def_internal(input2: syn::Path) -> bool {
     command.env("CARGO_HOME", temp_dir.as_os_str());
 
     temp_dir.pop();
+    temp_dir.push("target");
+
+    command.env("CARGO_TARGET_DIR", temp_dir.as_os_str());
+
+    temp_dir.pop();
     drop(temp_dir);
     drop(t);
 
@@ -271,7 +287,9 @@ fn if_def_internal(input2: syn::Path) -> bool {
             continue;
         }
 
+        eprintln!("checking {}:{}:{}", Path::new(file).display(), line, column);
         if stderr.contains(&format!("{}:{}:{}", Path::new(file).display(), line, column)) {
+            eprintln!("contained");
             return false;
         }
 
@@ -281,11 +299,9 @@ fn if_def_internal(input2: syn::Path) -> bool {
     true
 }
 
-use syn::parse_macro_input;
-
 #[proc_macro_attribute]
 pub fn if_def(attr: TokenStream, item: TokenStream) -> TokenStream {
-    if attr.to_string() == quote!(::core).to_string() || if_def_internal(parse_macro_input!(attr as syn::Path)) {
+    if attr.to_string() == quote!(::core).to_string() || if_def_internal(attr) {
         item
     } else {
         TokenStream::new()
@@ -296,7 +312,7 @@ use proc_macro::quote;
 
 #[proc_macro]
 pub fn defined(input: TokenStream) -> TokenStream {
-    if input.to_string() == quote!(::core).to_string() || if_def_internal(parse_macro_input!(input as syn::Path)) {
+    if input.to_string() == quote!(::core).to_string() || if_def_internal(input) {
         quote!(true)
     } else {
         quote!(false)
@@ -309,7 +325,7 @@ const CFG_FALSE: &'static str = if cfg!(windows) { "unix" } else { "windows" };
 
 #[proc_macro]
 pub fn cfg_defined(input: TokenStream) -> TokenStream {
-    if input.to_string() == quote!(::core).to_string() || if_def_internal(parse_macro_input!(input as syn::Path)) {
+    if input.to_string() == quote!(::core).to_string() || if_def_internal(input) {
         CFG_TRUE.parse().unwrap()
     } else {
         CFG_FALSE.parse().unwrap()
@@ -317,20 +333,6 @@ pub fn cfg_defined(input: TokenStream) -> TokenStream {
 }
 
 /*
-fn first_span(x: TokenStream) -> Span {
-    use proc_macro::TokenTree::*;
-
-    for e in x {
-        return match e {
-            Group(x) => x.span(),
-            Ident(x) => x.span(),
-            Punct(x) => x.span(),
-            Literal(x) => x.span(),
-        }
-    }
-
-    panic!()
-}
 
 fn replace_crate_comp(x: &mut syn::Path, crate_rep: syn::Ident) {
     if let Some(e) = x.segments.first() {

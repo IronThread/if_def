@@ -17,9 +17,3 @@ proc-macro = true
 sync_2 = "1"
 dirs = "3"
 rand = "0"
-quote = "1"
-
-[dependencies.syn]
-version = "1"
-default-features = false
-features = ["parsing", "proc-macro", "derive", "printing"]
