@@ -282,7 +282,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
             continue;
         }
 
-        eprintln!("checking {}:{}:{}", Path::new(file).display(), line, column);
+        eprintln!("checking {} : {} : {}", Path::new(file).display(), line, column);
         if stderr.contains(&format!("{}:{}:{}", Path::new(file).display(), line, column)) {
             eprintln!("contained");
             return false;
