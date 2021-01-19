@@ -243,11 +243,6 @@ fn if_def_internal(input2: TokenStream) -> bool {
     command.env("CARGO_HOME", temp_dir.as_os_str());
 
     temp_dir.pop();
-    temp_dir.push("target");
-
-    command.env("CARGO_TARGET_DIR", temp_dir.as_os_str());
-
-    temp_dir.pop();
     drop(temp_dir);
     drop(t);
 
