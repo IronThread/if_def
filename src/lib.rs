@@ -3,9 +3,10 @@
 use ::{
     proc_macro::{Span, TokenStream},
     std::{
+        convert::TryInto,
         env,
         fs::{self, File},
-        io::{prelude::*, ErrorKind},
+        io::{prelude::*, ErrorKind, SeekFrom},
         path::{Path, PathBuf},
         process::Command,
     },
@@ -33,7 +34,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
         return true
     }
 
-    if input == quote!(false).to_string() || env::var("RUST_IF_DEF_CHECKING").is_ok() {
+    if input == quote!(false).to_string() || env::var("RUST_IF_DEF").is_ok() {
         return false
     }
 
@@ -107,6 +108,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
         for e in fs::read_dir(src).expect("failed to read src") {
             let entry = e.expect("failed to get entry of src");
             let path = entry.path();
+
             let file_name = path.file_name().unwrap();
             temp_dir.push(file_name);
 
@@ -126,9 +128,11 @@ fn if_def_internal(input2: TokenStream) -> bool {
                     *last_opened = Some((r, f));
                 } else {
                     unsafe {
+                        let file_len = f.metadata().expect("failed to get file metadata").len();
                         let buffer = buffer.as_mut_vec();
                         r.read_to_end(buffer)
                             .expect("failed to read source code from crate");
+                        buffer.resize(buffer.len().max(file_len.try_into().unwrap()), b' ');
                         f.write_all(&buffer[..])
                             .expect("failed to write source code to temp crate");
                         buffer.clear();
@@ -251,7 +255,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
     temp_dir.push(".cargo");
 
     command.env("CARGO_HOME", temp_dir.as_os_str());
-    command.env("RUST_IF_DEF_CHECKING", "");
+    command.env("RUST_IF_DEF", "");
 
     if cfg!(not(debug_assertions)) {
         command.arg("--release");
@@ -301,13 +305,16 @@ fn if_def_internal(input2: TokenStream) -> bool {
         column += 1;
     }
 
-        unsafe {
-            buffer
-                .as_mut_vec()
-                .splice(splice_start..splice_end, result.to_string().as_bytes().iter().copied());
-            code_file.write_all(buffer.as_bytes()).expect("failed to write source code to temp crate");
-        }
+    unsafe {
+            let buffer = buffer.as_mut_vec();
+            let len = buffer.len();
 
+            buffer.splice(splice_start..splice_end, result.to_string().as_bytes().iter().copied());
+            buffer.resize(len.max(buffer.len()), b' ');
+
+            code_file.seek(SeekFrom::Start(0)).expect("error seeking");
+            code_file.write_all(&buffer[..]).expect("failed to write source code to temp crate");
+    }
     result
 }
 
