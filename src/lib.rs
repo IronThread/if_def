@@ -4,7 +4,6 @@ use ::{
     proc_macro::{Span, TokenStream},
     std::{
         env,
-        fmt::Write as FmtWrite,
         fs::{self, File},
         io::{prelude::*, ErrorKind},
         path::{Path, PathBuf},
@@ -28,7 +27,15 @@ fn first_span(x: TokenStream) -> Option<Span> {
 }
 
 fn if_def_internal(input2: TokenStream) -> bool {
-    let input = input2.clone();
+    let input = input2.to_string();
+
+    if input == quote!(true).to_string() {
+        return true
+    }
+
+    if input == quote!(false).to_string() || env::var("RUST_IF_DEF_CHECKING").is_ok() {
+        return false
+    }
 
     let span = if let Some(e) = first_span(input2) {
         e
@@ -38,19 +45,19 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
     let import = format!("#[allow(unused_imports)]use {} as _;", input);
 
-    let mut t = TEMP_DIR.lock().unwrap();
-    let temp_dir = t.get_or_insert_with(|| env::var_os("TMP")
-.or_else(|| env::var_os("OUT_DIR")).map(PathBuf::from).or_else(|| Some(PathBuf::default())).map(|mut p| {
-            p.push("rust_if_def");
-            p
-        }).unwrap());
-
     let mut ctd = CRATE_DIR.lock().unwrap();
     let crate_dir = ctd.get_or_insert_with(|| {
         env::var_os("CARGO_MANIFEST_DIR")
             .map(PathBuf::from)
             .unwrap_or_default()
     });
+
+    let mut t = TEMP_DIR.lock().unwrap();
+    let temp_dir = t.get_or_insert_with(|| env::var_os("TMP")
+.or_else(|| env::var_os("OUT_DIR")).map(PathBuf::from).or_else(|| Some(PathBuf::default())).map(|mut p| {
+            p.push("rust_if_def");
+            p
+        }).unwrap());
 
     let start = span.start();
     let end = span.end();
@@ -59,32 +66,36 @@ fn if_def_internal(input2: TokenStream) -> bool {
     let file = p
         .file_name()
         .expect("maybe not that real file lacks filename");
-
-    let crate_n = {
-        fn random() -> u128 {
+    
+    /*
+        let random = || {
             use std::time::*;
 
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_else(|e| e.duration()).as_nanos()
+        };
+
+        let mut rand_int = random();
+        let mut crate_n = t.to_string();
+
+        loop {
+            temp_dir.push(&crate_n);
+            if Path::exists(&temp_dir) {
+                rand_int = random();
+                n.clear();
+                write!(n, "{}", rand_int).unwrap();
+                temp_dir.pop();
+            } else {
+                break
+            }
         }
+    */
 
-        let mut t = random();
-        let mut n = t.to_string();
-
-        while Path::new(&n[..]).exists() {
-            t = random();
-            n.clear();
-            write!(n, "{}", t).unwrap();
-        }
-
-        n
-    };
+    temp_dir.push("crate_n");
 
     let mut buffer = String::new();
-    let mut cr = false;
-    let mut start_index = 0;
+    let cr;
+    let mut start_index;
     let mut last_opened = None;
-
-    temp_dir.push(&crate_n);
 
     fn copy_all<T: AsRef<Path>, U: AsRef<Path>>(
         src: T,
@@ -149,7 +160,10 @@ fn if_def_internal(input2: TokenStream) -> bool {
     crate_dir.pop();
     temp_dir.pop();
 
-    if let Some((mut r, mut f)) = last_opened {
+    let splice_start;
+    let splice_end;
+
+    let mut code_file = if let Some((mut r, mut f)) = last_opened {
         r.read_to_string(&mut buffer)
             .expect("failed to read source code from crate");
 
@@ -176,11 +190,8 @@ fn if_def_internal(input2: TokenStream) -> bool {
             .sum::<usize>()
             + end.column;
 
-        unsafe {
-            buffer
-                .as_mut_vec()
-                .splice(start_index..end_index, "::core".as_bytes().iter().copied());
-        }
+            splice_start = start_index;
+            splice_end = end_index;
 
         let mut close_brace_count = 0_usize;
         let mut close_par_count = 0_usize;
@@ -206,7 +217,10 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
         f.write_all(buffer.as_bytes())
             .expect("failed to write source code to temp crate");
-    }
+        f
+    } else {
+        panic!()
+    };
 
     temp_dir.push("Cargo.toml");
     crate_dir.push("Cargo.toml");
@@ -237,10 +251,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
     temp_dir.push(".cargo");
 
     command.env("CARGO_HOME", temp_dir.as_os_str());
-
-    temp_dir.pop();
-    drop(temp_dir);
-    drop(t);
+    command.env("RUST_IF_DEF_CHECKING", "");
 
     if cfg!(not(debug_assertions)) {
         command.arg("--release");
@@ -265,6 +276,8 @@ fn if_def_internal(input2: TokenStream) -> bool {
         index += 1 + (cr as usize);
     }
 
+    let mut result = true;
+
     for c in buffer[start_index..start_index + import.len()].chars() {
         if c == '\r' {
             continue;
@@ -282,18 +295,25 @@ fn if_def_internal(input2: TokenStream) -> bool {
             line,
             column
         )) {
-            return false;
+            result = false;
         }
 
         column += 1;
     }
 
-    true
+        unsafe {
+            buffer
+                .as_mut_vec()
+                .splice(splice_start..splice_end, result.to_string().as_bytes().iter().copied());
+            code_file.write_all(buffer.as_bytes()).expect("failed to write source code to temp crate");
+        }
+
+    result
 }
 
 #[proc_macro_attribute]
 pub fn if_def(attr: TokenStream, item: TokenStream) -> TokenStream {
-    if attr.to_string() == quote!(::core).to_string() || if_def_internal(attr) {
+    if if_def_internal(attr) {
         item
     } else {
         TokenStream::new()
@@ -304,23 +324,25 @@ use proc_macro::quote;
 
 #[proc_macro]
 pub fn defined(input: TokenStream) -> TokenStream {
-    if input.to_string() == quote!(::core).to_string() || if_def_internal(input) {
+    if if_def_internal(input) {
         quote!(true)
     } else {
         quote!(false)
     }
 }
 
-const CFG_TRUE: &'static str = if cfg!(windows) { "windows" } else { "unix" };
-
-const CFG_FALSE: &'static str = if cfg!(windows) { "unix" } else { "windows" };
-
 #[proc_macro]
 pub fn cfg_defined(input: TokenStream) -> TokenStream {
-    if input.to_string() == quote!(::core).to_string() || if_def_internal(input) {
-        CFG_TRUE.parse().unwrap()
+    if if_def_internal(input) {
+        // one of this have to be setted or both,as rust does not support to delete cfg variables
+        if cfg!(windows) { quote!(windows) } else { quote!(unix) }
+    } else if cfg!(rust_if_def_reserved_1) {
+        // note: not quoting here as the `compile_error!` that make the compilation of this
+        // procedural macro library fail instead
+        r##"compile_error!(r#"`rust_if_def_reserved_1` somehow setted as cfg variable,aborting"#)"##
+        .parse().unwrap()
     } else {
-        CFG_FALSE.parse().unwrap()
+        quote!(rust_if_def_reserved_1)
     }
 }
 
