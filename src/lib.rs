@@ -87,7 +87,9 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
     let start = span.start();
     let end = span.end();
-    let p = fs::canonicalize(&span.source_file().path()).expect("error canonicalizing path");
+    let p = span.source_file().path();
+
+    panic!("{}", p.display());
 
     let file = p
         .file_name()
