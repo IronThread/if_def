@@ -87,7 +87,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
     let start = span.start();
     let end = span.end();
-    let p = fs::canonicalize(&span.source_file().path()).unwrap();
+    let p = fs::canonicalize(&span.source_file().path()).expect("error canonicalizing path");
 
     let file = p
         .file_name()
@@ -128,11 +128,11 @@ fn if_def_internal(input2: TokenStream) -> bool {
             let entry = e.expect("failed to get entry of src");
             let path = entry.path();
 
-            let file_name = path.file_name().unwrap();
+            let file_name = path.file_name().expect("entry have not a file name,surprise!");
 
             temp_dir.push(file_name);
 
-            if entry.metadata().unwrap().is_dir() {
+            if entry.metadata().expect("failed to get metadata of entry").is_dir() {
                 match fs::create_dir(&temp_dir) {
                     Ok(()) => (),
                     x => x.expect("failed creating source directory in temp crate"),
@@ -144,7 +144,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
                 if b {
                     r.write_all(code.as_bytes()).expect("failed to write source code to temp crate");
-                    r.set_len(code.len() as _).unwrap();
+                    r.set_len(code.len() as _).expect("failed to set the length of temp crate file");
                     r.seek(SeekFrom::Start(0)).expect("error seeking");
                 }
             }
@@ -175,7 +175,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
     crate_dir.pop();
     temp_dir.pop();
 
-    let (ref mut buffer, ref mut temp_file) = *file_map.get_mut(&p).unwrap();
+    let (ref mut buffer, ref mut temp_file) = *file_map.get_mut(&p).expect("entry not there as predicted");
 
     let cr = buffer.find('\n').and_then(|i| buffer.get(i - 1..i)).map(|e| e == "\r").unwrap_or(false);
 
@@ -306,8 +306,9 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
         temp_file.seek(SeekFrom::Start(0)).expect("error seeking");
         temp_file.write_all(&buffer[..]).expect("failed to write source code to temp crate");
-        temp_file.set_len(buffer.len() as _).unwrap();
+        temp_file.set_len(buffer.len() as _).expect("failed to set the length of temp crate file");
     }
+
     result
 }
 
@@ -340,7 +341,7 @@ pub fn cfg_defined(input: TokenStream) -> TokenStream {
         // note: not quoting here as the `compile_error!` that make the compilation of this
         // procedural macro library fail instead
         r##"compile_error!(r#"`rust_if_def_reserved_1` somehow setted as cfg variable,aborting"#)"##
-        .parse().unwrap()
+        .parse().expect("bad syntax of compile error")
     } else {
         quote!(rust_if_def_reserved_1)
     }
