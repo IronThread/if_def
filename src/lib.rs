@@ -3,18 +3,20 @@
 use ::{
     proc_macro::{Span, TokenStream},
     std::{
-        convert::TryInto,
+        collections::HashMap,
         env,
         fs::{self, File},
         io::{prelude::*, ErrorKind, SeekFrom},
         path::{Path, PathBuf},
         process::Command,
     },
-    sync_2::Mutex,
+    sync_2::{Mutex, RwLock},
 };
 
 static TEMP_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
 static CRATE_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+static STRATEGY: RwLock<bool> = RwLock::new(false);
+static CODE_TABLE: Mutex<Option<HashMap<PathBuf, (String, File)>>> = Mutex::new(None);
 
 fn first_span(x: TokenStream) -> Option<Span> {
     use proc_macro::TokenTree::*;
@@ -27,14 +29,37 @@ fn first_span(x: TokenStream) -> Option<Span> {
     })
 }
 
+
+#[proc_macro]
+pub fn strategy_false(x: TokenStream) -> TokenStream {
+    *STRATEGY.write().unwrap() = false;
+    x
+}
+
+#[proc_macro]
+pub fn strategy_true(x: TokenStream) -> TokenStream {
+    *STRATEGY.write().unwrap() = true;
+    x
+}
+
+#[proc_macro]
+pub fn strategy_toggle(x: TokenStream) -> TokenStream {
+    let mut l = STRATEGY.write().unwrap();
+    *l = !*l;
+    x
+}
+
 fn if_def_internal(input2: TokenStream) -> bool {
     let input = input2.to_string();
 
-    if input == quote!(true).to_string() {
+    let nested = || env::var("RUST_IF_DEF").is_ok();
+    let strategy = STRATEGY.read().unwrap();
+
+    if input == quote!(true).to_string() || if *strategy { nested() } else { false } {
         return true
     }
 
-    if input == quote!(false).to_string() || env::var("RUST_IF_DEF").is_ok() {
+    if input == quote!(false).to_string() || if *strategy { false } else { nested() } {
         return false
     }
 
@@ -62,7 +87,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
     let start = span.start();
     let end = span.end();
-    let p = span.source_file().path();
+    let p = fs::canonicalize(&span.source_file().path()).unwrap();
 
     let file = p
         .file_name()
@@ -93,50 +118,34 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
     temp_dir.push("crate_n");
 
-    let mut buffer = String::new();
-    let cr;
-    let mut start_index;
-    let mut last_opened = None;
-
-    fn copy_all<T: AsRef<Path>, U: AsRef<Path>>(
+    fn copy_all<T: AsRef<Path>>(
         src: T,
         temp_dir: &mut PathBuf,
-        last_opened: &mut Option<(File, File)>,
-        buffer: &mut String,
-        file: U,
+        file: &Path,
+        file_map: &mut HashMap<PathBuf, (String, File)>
     ) {
         for e in fs::read_dir(src).expect("failed to read src") {
             let entry = e.expect("failed to get entry of src");
             let path = entry.path();
 
             let file_name = path.file_name().unwrap();
+
             temp_dir.push(file_name);
 
             if entry.metadata().unwrap().is_dir() {
                 match fs::create_dir(&temp_dir) {
                     Ok(()) => (),
-                    Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
                     x => x.expect("failed creating source directory in temp crate"),
                 }
-                copy_all(&*path, &mut *temp_dir, last_opened, buffer, file.as_ref());
+                copy_all(&*path, &mut *temp_dir, file.as_ref(), &mut *file_map);
             } else {
-                let mut f =
-                    File::create(&*temp_dir).expect("failed to copy from src,creating a file.");
-                let mut r = File::open(&*path).expect("failed to copy from src,reading a file.");
+                let b = path != file;
+                let (ref mut code, ref mut r) = *file_map.entry(path).or_insert_with_key(|e| (fs::read_to_string(e).expect("failed to copy from src,reading a file"), File::create(&temp_dir).expect("failed to copy from src,creating a file")));
 
-                if last_opened.is_none() && file_name == file.as_ref().as_os_str() {
-                    *last_opened = Some((r, f));
-                } else {
-                    unsafe {
-                        let file_len = f.metadata().expect("failed to get file metadata").len();
-                        let buffer = buffer.as_mut_vec();
-                        r.read_to_end(buffer)
-                            .expect("failed to read source code from crate");
-                        buffer.resize(buffer.len().max(file_len.try_into().unwrap()), b' ');
-                        f.write_all(&buffer[..])
-                            .expect("failed to write source code to temp crate");
-                        buffer.clear();
-                    }
+                if b {
+                    r.write_all(code.as_bytes()).expect("failed to write source code to temp crate");
+                    r.set_len(code.len() as _).unwrap();
+                    r.seek(SeekFrom::Start(0)).expect("error seeking");
                 }
             }
 
@@ -147,41 +156,30 @@ fn if_def_internal(input2: TokenStream) -> bool {
     crate_dir.push("src");
     temp_dir.push("src");
 
+    let mut file_map_l = CODE_TABLE.lock().unwrap();
+    let file_map = file_map_l.get_or_insert_with(HashMap::new);
+
     match fs::create_dir_all(&temp_dir) {
-        Ok(()) => (),
+        Ok(()) => {
+            copy_all(
+                    &crate_dir,
+                    &mut *temp_dir,
+                    &p,
+                    &mut *file_map,
+                )
+        },
         Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
         x => x.expect("failed creating source directory in temp crate"),
     }
 
-    copy_all(
-        &crate_dir,
-        &mut *temp_dir,
-        &mut last_opened,
-        &mut buffer,
-        file,
-    );
-
     crate_dir.pop();
     temp_dir.pop();
 
-    let splice_start;
-    let splice_end;
+    let (ref mut buffer, ref mut temp_file) = *file_map.get_mut(&p).unwrap();
 
-    let mut code_file = if let Some((mut r, mut f)) = last_opened {
-        r.read_to_string(&mut buffer)
-            .expect("failed to read source code from crate");
+    let cr = buffer.find('\n').and_then(|i| buffer.get(i - 1..i)).map(|e| e == "\r").unwrap_or(false);
 
-        cr = if let Some(i) = buffer.find('\n') {
-            if let Some(s) = buffer.get(i - 1..i) {
-                s == "\r"
-            } else {
-                false
-            }
-        } else {
-            false
-        };
-
-        start_index = buffer
+        let mut start_index = buffer
             .lines()
             .take(start.line - 1)
             .map(|e| e.len() + 1 + (cr as usize))
@@ -194,8 +192,8 @@ fn if_def_internal(input2: TokenStream) -> bool {
             .sum::<usize>()
             + end.column;
 
-            splice_start = start_index;
-            splice_end = end_index;
+        let splice_start = start_index;
+        let splice_end = end_index;
 
         let mut close_brace_count = 0_usize;
         let mut close_par_count = 0_usize;
@@ -215,16 +213,12 @@ fn if_def_internal(input2: TokenStream) -> bool {
             })
             .unwrap_or(0);
 
-        start_index += 1;
+        start_index += 1; 
 
         buffer.insert_str(start_index, &import);
 
-        f.write_all(buffer.as_bytes())
+        temp_file.write_all(buffer.as_bytes())
             .expect("failed to write source code to temp crate");
-        f
-    } else {
-        panic!()
-    };
 
     temp_dir.push("Cargo.toml");
     crate_dir.push("Cargo.toml");
@@ -306,14 +300,13 @@ fn if_def_internal(input2: TokenStream) -> bool {
     }
 
     unsafe {
-            let buffer = buffer.as_mut_vec();
-            let len = buffer.len();
+        let buffer = buffer.as_mut_vec();
 
-            buffer.splice(splice_start..splice_end, result.to_string().as_bytes().iter().copied());
-            buffer.resize(len.max(buffer.len()), b' ');
+        buffer.splice(splice_start..splice_end, result.to_string().as_bytes().iter().copied());
 
-            code_file.seek(SeekFrom::Start(0)).expect("error seeking");
-            code_file.write_all(&buffer[..]).expect("failed to write source code to temp crate");
+        temp_file.seek(SeekFrom::Start(0)).expect("error seeking");
+        temp_file.write_all(&buffer[..]).expect("failed to write source code to temp crate");
+        temp_file.set_len(buffer.len() as _).unwrap();
     }
     result
 }
