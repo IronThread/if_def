@@ -277,11 +277,11 @@ fn if_def_internal(input2: TokenStream) -> bool {
         index += e.len();
 
         if index >= start_index {
-            column = index - start_index - import.len();
+            column = index - start_index;
             break;
         }
 
-        index += 1 + (cr as usize);
+        index += cr as usize;
     }
 
     let mut result = true;
