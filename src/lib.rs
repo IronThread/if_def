@@ -177,8 +177,8 @@ fn if_def_internal(input2: TokenStream) -> bool {
             .sum::<usize>()
             + end.column;
 
-        let splice_start = start_index;
-        let splice_end = end_index;
+        let splice_start = start_index + import.len();
+        let splice_end = end_index + import.len();
 
         let mut close_brace_count = 0_usize;
         let mut close_par_count = 0_usize;
