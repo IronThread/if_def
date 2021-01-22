@@ -77,9 +77,12 @@ fn if_def_internal(input2: TokenStream) -> bool {
     let mut t = TEMP_DIR.lock().unwrap();
     let temp_dir = t.get_or_insert_with(|| env::var_os("TMP").or_else(|| env::var_os("OUT_DIR")).map(PathBuf::from).unwrap().join("rust_if_def/crate_n"));
 
-    #[cfg(not(debug_me))]
     macro_rules! eprintln {
-        ($($a:tt)*) => {}
+        ($($a:tt)*) => {
+            if option_env!("DEBUG_RUST_IF_DEF").is_some() {
+                std::io::stderr().write_fmt(format_args!($($a)));
+            }
+        }
     }
 
     let start = span.start();
