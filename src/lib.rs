@@ -273,16 +273,20 @@ fn if_def_internal(input2: TokenStream) -> bool {
             continue;
         }
 
-        let args = format_args!(
+        let p = Path::new(file);
+
+        eprintln!(
             "{}:{}:{}",
-            Path::new(file).display(),
+            p.display(),
+            line,
+            column);
+
+        if stderr.contains(&format!(
+            "{}:{}:{}",
+            p.display(),
             line,
             column
-        );
-
-        eprintln!("{}", args);
-
-        if stderr.contains(&args.to_string()) {
+        )) {
             eprintln!("pointed in compile error");
             result = false;
         }
