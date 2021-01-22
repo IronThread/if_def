@@ -167,6 +167,11 @@ fn if_def_internal(input2: TokenStream) -> bool {
     temp_dir.push("src");
     let dir_existed = temp_dir.exists();
 
+    match fs::create_dir_all(&temp_dir) {
+        Ok(()) => {}
+        x => x.expect("failed creating source directory in temp crate")
+    };
+
     if !dir_existed {
         crate_dir.push("src");
         copy_all(&crate_dir, &mut *temp_dir, &p, &mut *file_map);
@@ -174,11 +179,6 @@ fn if_def_internal(input2: TokenStream) -> bool {
     }
 
     temp_dir.pop();
-
-    match fs::create_dir_all(&temp_dir).map_err(|e| e.kind()) {
-        Ok(()) | Err(ErrorKind::AlreadyExists) => {}
-        x => x.expect("failed creating source directory in temp crate")
-    };
 
     let (ref mut buffer, ref mut temp_file) =
         *file_map.get_mut(&p).expect("entry not there as predicted");
