@@ -298,12 +298,10 @@ fn if_def_internal(input2: TokenStream) -> bool {
     }
 
     unsafe {
-        let buffer = buffer.as_mut_vec();
-
-        buffer.splice(splice_start..splice_end, result.to_string().as_bytes().iter().copied());
+        buffer.as_mut_vec().splice(splice_start..splice_end, result.to_string().as_bytes().iter().copied());
         eprintln!("buffer spliced with result: \n{}", buffer);
         temp_file.seek(SeekFrom::Start(0)).expect("error seeking");
-        temp_file.write_all(&buffer[..]).expect("failed to write source code to temp crate");
+        temp_file.write_all(buffer.as_bytes()).expect("failed to write source code to temp crate");
         temp_file.set_len(buffer.len() as _).expect("failed to set the length of temp crate file");
     }
 
