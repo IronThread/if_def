@@ -6,7 +6,7 @@ use ::{
         collections::HashMap,
         env,
         fs::{self, File},
-        io::{prelude::*, ErrorKind, SeekFrom},
+        io::{prelude::*, ErrorKind, SeekFrom, sink},
         path::{Path, PathBuf},
         process::Command,
     },
@@ -72,18 +72,15 @@ fn if_def_internal(input2: TokenStream) -> bool {
     let import = format!("#[allow(unused_imports)]use {} as _;", input);
 
     let mut ctd = CRATE_DIR.lock().unwrap();
-    let crate_dir = ctd.get_or_insert_with(|| {
-        env::var_os("CARGO_MANIFEST_DIR")
-            .map(PathBuf::from)
-            .unwrap_or_default()
-    });
+    let crate_dir = ctd.get_or_insert_with(|| env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from).unwrap_or_default());
 
     let mut t = TEMP_DIR.lock().unwrap();
-    let temp_dir = t.get_or_insert_with(|| env::var_os("TMP")
-.or_else(|| env::var_os("OUT_DIR")).map(PathBuf::from).or_else(|| Some(PathBuf::default())).map(|mut p| {
-            p.push("rust_if_def");
-            p
-        }).unwrap());
+    let temp_dir = t.get_or_insert_with(|| env::var_os("TMP").or_else(|| env::var_os("OUT_DIR")).map(PathBuf::from).unwrap().join("rust_if_def/crate_n"));
+
+    #[cfg(not(debug_me))]
+    macro_rules! eprintln {
+        ($($a:tt)*) => {}
+    }
 
     let start = span.start();
     let end = span.end();
@@ -99,24 +96,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
             SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_else(|e| e.duration()).as_nanos()
         };
-
-        let mut rand_int = random();
-        let mut crate_n = t.to_string();
-
-        loop {
-            temp_dir.push(&crate_n);
-            if Path::exists(&temp_dir) {
-                rand_int = random();
-                n.clear();
-                write!(n, "{}", rand_int).unwrap();
-                temp_dir.pop();
-            } else {
-                break
-            }
-        }
     */
-
-    temp_dir.push("crate_n");
 
     fn copy_all<T: AsRef<Path>>(
         src: T,
@@ -132,6 +112,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
             temp_dir.push(file_name);
 
+            eprintln!("temp dir copying {}", temp_dir.display());
             if entry.metadata().expect("failed to get metadata of entry").is_dir() {
                 match fs::create_dir(&temp_dir) {
                     Ok(()) => (),
@@ -139,6 +120,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
                 }
                 copy_all(&*path, &mut *temp_dir, file.as_ref(), &mut *file_map);
             } else {
+                eprintln!("{} != {}", path.display(), file.display());
                 let b = path != file;
                 let (ref mut code, ref mut r) = *file_map.entry(path).or_insert_with_key(|e| (fs::read_to_string(e).expect("failed to copy from src,reading a file"), File::create(&temp_dir).expect("failed to copy from src,creating a file")));
 
@@ -150,32 +132,35 @@ fn if_def_internal(input2: TokenStream) -> bool {
             }
 
             temp_dir.pop();
+            eprintln!("temp dir end copying {}", temp_dir.display());
         }
     }
-
-    crate_dir.push("src");
-    temp_dir.push("src");
 
     let mut file_map_l = CODE_TABLE.lock().unwrap();
     let file_map = file_map_l.get_or_insert_with(HashMap::new);
 
+
     match fs::create_dir_all(&temp_dir) {
         Ok(()) => {
+            crate_dir.push("src");
+            temp_dir.push("src");
+
             copy_all(
                     &crate_dir,
                     &mut *temp_dir,
                     &p,
                     &mut *file_map,
-                )
+                );
+
+            crate_dir.pop();
+            temp_dir.pop();
         },
         Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
         x => x.expect("failed creating source directory in temp crate"),
     }
 
-    crate_dir.pop();
-    temp_dir.pop();
-
     let (ref mut buffer, ref mut temp_file) = *file_map.get_mut(&p).expect("entry not there as predicted");
+    eprintln!("buffer initially:\n{}", buffer);
 
     let cr = buffer.find('\n').and_then(|i| buffer.get(i - 1..i)).map(|e| e == "\r").unwrap_or(false);
 
@@ -216,6 +201,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
         start_index += 1; 
 
         buffer.insert_str(start_index, &import);
+        eprintln!("buffer after import of the path:\n{}", buffer);
 
         temp_file.write_all(buffer.as_bytes())
             .expect("failed to write source code to temp crate");
@@ -287,12 +273,17 @@ fn if_def_internal(input2: TokenStream) -> bool {
             continue;
         }
 
-        if stderr.contains(&format!(
+        let args = format_args!(
             "{}:{}:{}",
             Path::new(file).display(),
             line,
             column
-        )) {
+        );
+
+        eprintln!("{}", args);
+
+        if stderr.contains(&args.to_string()) {
+            eprintln!("pointed in compile error");
             result = false;
         }
 
@@ -303,7 +294,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
         let buffer = buffer.as_mut_vec();
 
         buffer.splice(splice_start..splice_end, result.to_string().as_bytes().iter().copied());
-
+        eprintln!("buffer spliced with result: \n{}", buffer);
         temp_file.seek(SeekFrom::Start(0)).expect("error seeking");
         temp_file.write_all(&buffer[..]).expect("failed to write source code to temp crate");
         temp_file.set_len(buffer.len() as _).expect("failed to set the length of temp crate file");
