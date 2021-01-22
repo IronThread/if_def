@@ -80,7 +80,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
     macro_rules! eprintln {
         ($($a:tt)*) => {
             if option_env!("DEBUG_RUST_IF_DEF").is_some() {
-                std::io::stderr().write_fmt(format_args!($($a)));
+                std::io::stderr().write_fmt(format_args!($($a)*));
             }
         }
     }
