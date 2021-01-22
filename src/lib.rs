@@ -164,28 +164,26 @@ fn if_def_internal(input2: TokenStream) -> bool {
     let mut file_map_l = CODE_TABLE.lock().unwrap();
     let file_map = file_map_l.get_or_insert_with(HashMap::new);
 
-    let seek_now = match fs::create_dir_all(&temp_dir) {
-        Ok(()) => {
-            crate_dir.push("src");
-            temp_dir.push("src");
+    temp_dir.push("src");
+    let dir_existed = temp_dir.exists();
 
-            copy_all(&crate_dir, &mut *temp_dir, &p, &mut *file_map);
+    if !dir_existed {
+        crate_dir.push("src");
+        copy_all(&crate_dir, &mut *temp_dir, &p, &mut *file_map);
+        crate_dir.pop();
+    }
 
-            crate_dir.pop();
-            temp_dir.pop();
-            false
-        }
-        Err(e) if e.kind() == ErrorKind::AlreadyExists => true,
-        x => {
-            x.expect("failed creating source directory in temp crate");
-            false
-        },
+    temp_dir.pop();
+
+    match fs::create_dir_all(&temp_dir).map_err(|e| e.kind()) {
+        Ok(()) | Err(ErrorKind::AlreadyExists) => {}
+        x => x.expect("failed creating source directory in temp crate")
     };
 
     let (ref mut buffer, ref mut temp_file) =
         *file_map.get_mut(&p).expect("entry not there as predicted");
 
-    if seek_now {
+    if dir_existed {
         temp_file.seek(SeekFrom::Start(0)).expect("error seeking");
     }
 
