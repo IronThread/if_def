@@ -6,7 +6,7 @@ use ::{
         collections::HashMap,
         env,
         fs::{self, File},
-        io::{prelude::*, ErrorKind, SeekFrom, sink},
+        io::{prelude::*, ErrorKind, SeekFrom},
         path::{Path, PathBuf},
         process::Command,
     },
@@ -29,7 +29,6 @@ fn first_span(x: TokenStream) -> Option<Span> {
     })
 }
 
-
 #[proc_macro]
 pub fn strategy_false(x: TokenStream) -> TokenStream {
     *STRATEGY.write().unwrap() = false;
@@ -50,17 +49,25 @@ pub fn strategy_toggle(x: TokenStream) -> TokenStream {
 }
 
 fn if_def_internal(input2: TokenStream) -> bool {
+    macro_rules! eprintln {
+        ($($a:tt)*) => {
+            if option_env!("DEBUG_RUST_IF_DEF").is_some() {
+                std::io::stderr().write_fmt(format_args!("{}\n", format_args!($($a)*))).unwrap();
+            }
+        }
+    }
+
     let input = input2.to_string();
 
     let nested = || env::var("RUST_IF_DEF").is_ok();
     let strategy = STRATEGY.read().unwrap();
 
     if input == quote!(true).to_string() || if *strategy { nested() } else { false } {
-        return true
+        return true;
     }
 
     if input == quote!(false).to_string() || if *strategy { false } else { nested() } {
-        return false
+        return false;
     }
 
     let span = if let Some(e) = first_span(input2) {
@@ -72,18 +79,20 @@ fn if_def_internal(input2: TokenStream) -> bool {
     let import = format!("#[allow(unused_imports)]use {} as _;", input);
 
     let mut ctd = CRATE_DIR.lock().unwrap();
-    let crate_dir = ctd.get_or_insert_with(|| env::var_os("CARGO_MANIFEST_DIR").map(PathBuf::from).unwrap_or_default());
+    let crate_dir = ctd.get_or_insert_with(|| {
+        env::var_os("CARGO_MANIFEST_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_default()
+    });
 
     let mut t = TEMP_DIR.lock().unwrap();
-    let temp_dir = t.get_or_insert_with(|| env::var_os("TMP").or_else(|| env::var_os("OUT_DIR")).map(PathBuf::from).unwrap().join("rust_if_def/crate_n"));
-
-    macro_rules! eprintln {
-        ($($a:tt)*) => {
-            if option_env!("DEBUG_RUST_IF_DEF").is_some() {
-                std::io::stderr().write_fmt(format_args!($($a)*));
-            }
-        }
-    }
+    let temp_dir = t.get_or_insert_with(|| {
+        env::var_os("TMP")
+            .or_else(|| env::var_os("OUT_DIR"))
+            .map(PathBuf::from)
+            .unwrap()
+            .join("rust_if_def/crate_n")
+    });
 
     let start = span.start();
     let end = span.end();
@@ -92,7 +101,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
     let file = p
         .file_name()
         .expect("maybe not that real file lacks filename");
-    
+
     /*
         let random = || {
             use std::time::*;
@@ -105,18 +114,24 @@ fn if_def_internal(input2: TokenStream) -> bool {
         src: T,
         temp_dir: &mut PathBuf,
         file: &Path,
-        file_map: &mut HashMap<PathBuf, (String, File)>
+        file_map: &mut HashMap<PathBuf, (String, File)>,
     ) {
         for e in fs::read_dir(src).expect("failed to read src") {
             let entry = e.expect("failed to get entry of src");
             let path = entry.path();
 
-            let file_name = path.file_name().expect("entry have not a file name,surprise!");
+            let file_name = path
+                .file_name()
+                .expect("entry have not a file name,surprise!");
 
             temp_dir.push(file_name);
 
             eprintln!("temp dir copying {}", temp_dir.display());
-            if entry.metadata().expect("failed to get metadata of entry").is_dir() {
+            if entry
+                .metadata()
+                .expect("failed to get metadata of entry")
+                .is_dir()
+            {
                 match fs::create_dir(&temp_dir) {
                     Ok(()) => (),
                     x => x.expect("failed creating source directory in temp crate"),
@@ -125,11 +140,18 @@ fn if_def_internal(input2: TokenStream) -> bool {
             } else {
                 eprintln!("{} != {}", path.display(), file.display());
                 let b = path != file;
-                let (ref mut code, ref mut r) = *file_map.entry(path).or_insert_with_key(|e| (fs::read_to_string(e).expect("failed to copy from src,reading a file"), File::create(&temp_dir).expect("failed to copy from src,creating a file")));
+                let (ref mut code, ref mut r) = *file_map.entry(path).or_insert_with_key(|e| {
+                    (
+                        fs::read_to_string(e).expect("failed to copy from src,reading a file"),
+                        File::create(&temp_dir).expect("failed to copy from src,creating a file"),
+                    )
+                });
 
                 if b {
-                    r.write_all(code.as_bytes()).expect("failed to write source code to temp crate");
-                    r.set_len(code.len() as _).expect("failed to set the length of temp crate file");
+                    r.write_all(code.as_bytes())
+                        .expect("failed to write source code to temp crate");
+                    r.set_len(code.len() as _)
+                        .expect("failed to set the length of temp crate file");
                     r.seek(SeekFrom::Start(0)).expect("error seeking");
                 }
             }
@@ -142,72 +164,82 @@ fn if_def_internal(input2: TokenStream) -> bool {
     let mut file_map_l = CODE_TABLE.lock().unwrap();
     let file_map = file_map_l.get_or_insert_with(HashMap::new);
 
-
-    match fs::create_dir_all(&temp_dir) {
+    let seek_now = match fs::create_dir_all(&temp_dir) {
         Ok(()) => {
             crate_dir.push("src");
             temp_dir.push("src");
 
-            copy_all(
-                    &crate_dir,
-                    &mut *temp_dir,
-                    &p,
-                    &mut *file_map,
-                );
+            copy_all(&crate_dir, &mut *temp_dir, &p, &mut *file_map);
 
             crate_dir.pop();
             temp_dir.pop();
+            false
+        }
+        Err(e) if e.kind() == ErrorKind::AlreadyExists => true,
+        x => {
+            x.expect("failed creating source directory in temp crate");
+            false
         },
-        Err(e) if e.kind() == ErrorKind::AlreadyExists => (),
-        x => x.expect("failed creating source directory in temp crate"),
+    };
+
+    let (ref mut buffer, ref mut temp_file) =
+        *file_map.get_mut(&p).expect("entry not there as predicted");
+
+    if seek_now {
+        temp_file.seek(SeekFrom::Start(0)).expect("error seeking");
     }
 
-    let (ref mut buffer, ref mut temp_file) = *file_map.get_mut(&p).expect("entry not there as predicted");
     eprintln!("buffer initially:\n{}", buffer);
 
-    let cr = buffer.find('\n').and_then(|i| buffer.get(i - 1..i)).map(|e| e == "\r").unwrap_or(false);
+    let cr = buffer
+        .find('\n')
+        .and_then(|i| buffer.get(i - 1..i))
+        .map(|e| e == "\r")
+        .unwrap_or(false);
 
-        let mut start_index = buffer
-            .lines()
-            .take(start.line - 1)
-            .map(|e| e.len() + 1 + (cr as usize))
-            .sum::<usize>()
-            + start.column;
-        let end_index = buffer
-            .lines()
-            .take(end.line - 1)
-            .map(|e| e.len() + 1 + (cr as usize))
-            .sum::<usize>()
-            + end.column;
+    let mut start_index = buffer
+        .lines()
+        .take(start.line - 1)
+        .map(|e| e.len() + 1 + (cr as usize))
+        .sum::<usize>()
+        + start.column;
+    let end_index = buffer
+        .lines()
+        .take(end.line - 1)
+        .map(|e| e.len() + 1 + (cr as usize))
+        .sum::<usize>()
+        + end.column;
 
-        let splice_start = start_index + import.len();
-        let splice_end = end_index + import.len();
+    let splice_start = start_index + import.len();
+    let splice_end = end_index + import.len();
 
-        let mut close_brace_count = 0_usize;
-        let mut close_par_count = 0_usize;
-        start_index = buffer[..start_index]
-            .rfind(|c| {
-                let close_brace = c == '}';
-                let close_par = c == ')';
-                let open_par = c == '(';
-                let open_brace = c == '{';
+    let mut close_brace_count = 0_usize;
+    let mut close_par_count = 0_usize;
+    start_index = buffer[..start_index]
+        .rfind(|c| {
+            let close_brace = c == '}';
+            let close_par = c == ')';
+            let open_par = c == '(';
+            let open_brace = c == '{';
 
-                close_brace_count += close_brace as usize;
-                close_par_count += close_par as usize;
-                close_brace_count = close_brace_count.saturating_sub(open_brace as _);
-                close_par_count = close_par_count.saturating_sub(open_par as _);
+            close_brace_count += close_brace as usize;
+            close_par_count += close_par as usize;
+            close_brace_count = close_brace_count.saturating_sub(open_brace as _);
+            close_par_count = close_par_count.saturating_sub(open_par as _);
 
-                open_brace && close_brace_count == 0 && close_par_count == 0
-            })
-            .unwrap_or(0);
+            open_brace && close_brace_count == 0 && close_par_count == 0
+        })
+        .unwrap_or(0);
 
-        start_index += 1; 
+    start_index += 1;
 
-        buffer.insert_str(start_index, &import);
-        eprintln!("buffer after import of the path:\n{}", buffer);
+    buffer.insert_str(start_index, &import);
+    eprintln!("buffer after import of the path:\n{}", buffer);
 
-        temp_file.write_all(buffer.as_bytes())
-            .expect("failed to write source code to temp crate");
+    temp_file
+        .write_all(buffer.as_bytes())
+        .expect("failed to write source code to temp crate");
+    temp_file.set_len(buffer.len() as _).expect("setting the length");
 
     temp_dir.push("Cargo.toml");
     crate_dir.push("Cargo.toml");
@@ -278,18 +310,9 @@ fn if_def_internal(input2: TokenStream) -> bool {
 
         let p = Path::new(file);
 
-        eprintln!(
-            "{}:{}:{}",
-            p.display(),
-            line,
-            column);
+        eprintln!("{}:{}:{}", p.display(), line, column);
 
-        if stderr.contains(&format!(
-            "{}:{}:{}",
-            p.display(),
-            line,
-            column
-        )) {
+        if stderr.contains(&format!("{}:{}:{}", p.display(), line, column)) {
             eprintln!("pointed in compile error");
             result = false;
         }
@@ -298,11 +321,18 @@ fn if_def_internal(input2: TokenStream) -> bool {
     }
 
     unsafe {
-        buffer.as_mut_vec().splice(splice_start..splice_end, result.to_string().as_bytes().iter().copied());
+        buffer.as_mut_vec().splice(
+            splice_start..splice_end,
+            result.to_string().as_bytes().iter().copied(),
+        );
         eprintln!("buffer spliced with result: \n{}", buffer);
         temp_file.seek(SeekFrom::Start(0)).expect("error seeking");
-        temp_file.write_all(buffer.as_bytes()).expect("failed to write source code to temp crate");
-        temp_file.set_len(buffer.len() as _).expect("failed to set the length of temp crate file");
+        temp_file
+            .write_all(buffer.as_bytes())
+            .expect("failed to write source code to temp crate");
+        temp_file
+            .set_len(buffer.len() as _)
+            .expect("failed to set the length of temp crate file");
     }
 
     result
@@ -332,12 +362,17 @@ pub fn defined(input: TokenStream) -> TokenStream {
 pub fn cfg_defined(input: TokenStream) -> TokenStream {
     if if_def_internal(input) {
         // one of this have to be setted or both,as rust does not support to delete cfg variables
-        if cfg!(windows) { quote!(windows) } else { quote!(unix) }
+        if cfg!(windows) {
+            quote!(windows)
+        } else {
+            quote!(unix)
+        }
     } else if cfg!(rust_if_def_reserved_1) {
         // note: not quoting here as the `compile_error!` that make the compilation of this
         // procedural macro library fail instead
         r##"compile_error!(r#"`rust_if_def_reserved_1` somehow setted as cfg variable,aborting"#)"##
-        .parse().expect("bad syntax of compile error")
+            .parse()
+            .expect("bad syntax of compile error")
     } else {
         quote!(rust_if_def_reserved_1)
     }
