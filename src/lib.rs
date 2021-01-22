@@ -132,10 +132,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
                 .expect("failed to get metadata of entry")
                 .is_dir()
             {
-                match fs::create_dir(&temp_dir) {
-                    Ok(()) => (),
-                    x => x.expect("failed creating source directory in temp crate"),
-                }
+                fs::create_dir(&temp_dir).expect("failed creating source directory in temp crate");
                 copy_all(&*path, &mut *temp_dir, file.as_ref(), &mut *file_map);
             } else {
                 eprintln!("{} != {}", path.display(), file.display());
@@ -162,24 +159,24 @@ fn if_def_internal(input2: TokenStream) -> bool {
     }
 
     let mut file_map_l = CODE_TABLE.lock().unwrap();
-
-
-    let file_map = file_map_l.get_or_insert_with(|| { let mut file_map = HashMap::new(); 
-
-    temp_dir.push("src");
+    let file_map = file_map_l.get_or_insert_with(|| { 
+        let mut file_map = HashMap::new();
+ 
+        temp_dir.push("src");
         crate_dir.push("src");
 
-    fs::create_dir_all(&temp_dir).expect("failed creating source directory in temp crate");
+        fs::create_dir_all(&temp_dir).expect("failed creating source directory in temp crate");
 
         copy_all(&crate_dir, &mut *temp_dir, &p, &mut file_map);
+
         crate_dir.pop();
-    temp_dir.pop();
-    file_map
-});
+        temp_dir.pop();
+
+        file_map
+    });
 
     let (ref mut buffer, ref mut temp_file) =
         *file_map.get_mut(&p).expect("entry not there as predicted");
-
 
     eprintln!("buffer initially:\n{}", buffer);
 
@@ -280,7 +277,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
         index += e.len();
 
         if index >= start_index {
-            column = index - start_index;
+            column = index - start_index - import.len();
             break;
         }
 
