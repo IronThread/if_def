@@ -162,30 +162,24 @@ fn if_def_internal(input2: TokenStream) -> bool {
     }
 
     let mut file_map_l = CODE_TABLE.lock().unwrap();
-    let file_map = file_map_l.get_or_insert_with(HashMap::new);
+
+
+    let file_map = file_map_l.get_or_insert_with(|| { let mut file_map = HashMap::new(); 
 
     temp_dir.push("src");
-    let dir_existed = temp_dir.exists();
-
-    match fs::create_dir_all(&temp_dir) {
-        Ok(()) => {}
-        x => x.expect("failed creating source directory in temp crate")
-    };
-
-    if !dir_existed {
         crate_dir.push("src");
-        copy_all(&crate_dir, &mut *temp_dir, &p, &mut *file_map);
-        crate_dir.pop();
-    }
 
+    fs::create_dir_all(&temp_dir).expect("failed creating source directory in temp crate");
+
+        copy_all(&crate_dir, &mut *temp_dir, &p, &mut file_map);
+        crate_dir.pop();
     temp_dir.pop();
+    file_map
+});
 
     let (ref mut buffer, ref mut temp_file) =
         *file_map.get_mut(&p).expect("entry not there as predicted");
 
-    if dir_existed {
-        temp_file.seek(SeekFrom::Start(0)).expect("error seeking");
-    }
 
     eprintln!("buffer initially:\n{}", buffer);
 
@@ -331,6 +325,7 @@ fn if_def_internal(input2: TokenStream) -> bool {
         temp_file
             .set_len(buffer.len() as _)
             .expect("failed to set the length of temp crate file");
+    temp_file.seek(SeekFrom::Start(0)).expect("error seeking");
     }
 
     result
